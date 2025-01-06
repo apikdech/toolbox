@@ -1,0 +1,27 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Base64Converter from '../../components/Base64Converter';
+---
+
+<Layout>
+	<main>
+		<!-- Tool Header -->
+		<div class="bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+			<div class="container mx-auto px-4 py-12">
+				<div class="max-w-3xl mx-auto">
+					<h1 class="text-3xl md:text-4xl font-bold mb-4">Base64 Converter</h1>
+					<p class="text-xl text-blue-100">
+						Convert text to base64 and vice versa. A handy tool for encoding and decoding base64 strings.
+					</p>
+				</div>
+			</div>
+		</div>
+
+		<!-- Tool Content -->
+		<div class="container mx-auto px-4 py-8">
+			<div class="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-6">
+				<Base64Converter client:load />
+			</div>
+		</div>
+	</main>
+</Layout> 
