@@ -7,5 +7,10 @@ export const tools: Tool[] = [
     path: "/tools/base64",
     description: "Convert text to base64 and vice versa",
   },
-  // Add more tools here as they are created
+  {
+    id: "bill-split",
+    name: "Bill Splitter",
+    path: "/tools/bill-split",
+    description: "Split bills among friends with discounts and additional fees",
+  },
 ];
