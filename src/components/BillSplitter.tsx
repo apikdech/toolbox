@@ -26,47 +26,94 @@ const formatNumber = (value: number) => {
 const calculateDiscountedAmounts = (
   people: Person[],
   totalDiscount: number,
-  minimumSpend: number
+  minimumSpend: number,
+  discountType: "percentage" | "flat",
+  discountValue: number,
+  maxDiscountAmount: number
 ): { [key: string]: number } => {
   let discountedAmounts: { [key: string]: number } = {};
-  let remainingDiscount = totalDiscount;
-  let eligiblePeople = people.filter(
-    (person) =>
-      person.items.reduce((sum, item) => sum + item.price * item.quantity, 0) >
-      0
-  );
 
-  // Keep iterating as long as there's remaining discount and eligible people
-  while (remainingDiscount > 0 && eligiblePeople.length > 0) {
-    const discountPerPerson = remainingDiscount / eligiblePeople.length;
-    let unusedDiscount = 0;
+  if (discountType === "percentage") {
+    // Calculate total percentage discount first
+    const totalDiscountAmount = people.reduce((sum, person) => {
+      const subtotal = person.items.reduce(
+        (itemSum, item) => itemSum + item.price * item.quantity,
+        0
+      );
+      if (subtotal >= minimumSpend) {
+        return sum + (subtotal * discountValue) / 100;
+      }
+      return sum;
+    }, 0);
 
-    eligiblePeople.forEach((person) => {
+    // If total discount exceeds max, switch to flat discount distribution
+    if (totalDiscountAmount > maxDiscountAmount) {
+      return calculateDiscountedAmounts(
+        people,
+        maxDiscountAmount,
+        minimumSpend,
+        "flat",
+        maxDiscountAmount,
+        Infinity
+      );
+    }
+
+    // Apply percentage discount to each person
+    people.forEach((person) => {
       const subtotal = person.items.reduce(
         (sum, item) => sum + item.price * item.quantity,
         0
       );
-      const currentDiscount = discountedAmounts[person.id] || 0;
-      const remainingSubtotal = subtotal - currentDiscount;
 
-      if (remainingSubtotal > 0) {
-        const appliedDiscount = Math.min(discountPerPerson, remainingSubtotal);
-        discountedAmounts[person.id] =
-          (discountedAmounts[person.id] || 0) + appliedDiscount;
-        unusedDiscount += discountPerPerson - appliedDiscount;
+      if (subtotal >= minimumSpend) {
+        const personDiscount = (subtotal * discountValue) / 100;
+        discountedAmounts[person.id] = personDiscount;
       }
     });
+  } else {
+    // Flat discount distribution logic
+    let remainingDiscount = totalDiscount;
+    let eligiblePeople = people.filter(
+      (person) =>
+        person.items.reduce(
+          (sum, item) => sum + item.price * item.quantity,
+          0
+        ) >= minimumSpend
+    );
 
-    // Update remaining discount and eligible people for next iteration
-    remainingDiscount = unusedDiscount;
-    eligiblePeople = eligiblePeople.filter((person) => {
-      const subtotal = person.items.reduce(
-        (sum, item) => sum + item.price * item.quantity,
-        0
-      );
-      const currentDiscount = discountedAmounts[person.id] || 0;
-      return subtotal - currentDiscount > 0;
-    });
+    while (remainingDiscount > 0 && eligiblePeople.length > 0) {
+      const discountPerPerson = remainingDiscount / eligiblePeople.length;
+      let unusedDiscount = 0;
+
+      eligiblePeople.forEach((person) => {
+        const subtotal = person.items.reduce(
+          (sum, item) => sum + item.price * item.quantity,
+          0
+        );
+        const currentDiscount = discountedAmounts[person.id] || 0;
+        const remainingSubtotal = subtotal - currentDiscount;
+
+        if (remainingSubtotal > 0) {
+          const appliedDiscount = Math.min(
+            discountPerPerson,
+            remainingSubtotal
+          );
+          discountedAmounts[person.id] =
+            (discountedAmounts[person.id] || 0) + appliedDiscount;
+          unusedDiscount += discountPerPerson - appliedDiscount;
+        }
+      });
+
+      remainingDiscount = unusedDiscount;
+      eligiblePeople = eligiblePeople.filter((person) => {
+        const subtotal = person.items.reduce(
+          (sum, item) => sum + item.price * item.quantity,
+          0
+        );
+        const currentDiscount = discountedAmounts[person.id] || 0;
+        return subtotal - currentDiscount > 0;
+      });
+    }
   }
 
   return discountedAmounts;
@@ -191,6 +238,7 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
     minimumSpend: 0,
     maxDiscountAmount: Infinity,
   });
+  const [percentageInputValue, setPercentageInputValue] = useState("");
   const [additionalFees, setAdditionalFees] = useState<AdditionalFee[]>([]);
   const peopleContainerRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
@@ -207,6 +255,10 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
         setPeople(p);
         setDiscountSettings(d);
         setAdditionalFees(f);
+        // Set the percentage input value when loading from URL
+        if (d.type === "percentage") {
+          setPercentageInputValue(d.value.toString());
+        }
       } catch (error) {
         console.error("Error loading initial state:", error);
       }
@@ -350,29 +402,20 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
     );
     const sharedFeesPerPerson = totalAdditionalFees / (people.length || 1);
 
-    // Calculate total discount amount
+    // Calculate total discount amount for flat discount
     const totalDiscount =
-      discountSettings.type === "percentage"
-        ? Math.min(
-            people.reduce(
-              (sum, person) =>
-                sum +
-                person.items.reduce(
-                  (itemSum, item) => itemSum + item.price * item.quantity,
-                  0
-                ),
-              0
-            ) *
-              (discountSettings.value / 100),
-            discountSettings.maxDiscountAmount
-          )
-        : Math.min(discountSettings.value, discountSettings.maxDiscountAmount);
+      discountSettings.type === "flat"
+        ? Math.min(discountSettings.value, discountSettings.maxDiscountAmount)
+        : 0; // Not used for percentage discount
 
     // Get distributed discount amounts
     const discountedAmounts = calculateDiscountedAmounts(
       people,
       totalDiscount,
-      discountSettings.minimumSpend
+      discountSettings.minimumSpend,
+      discountSettings.type,
+      discountSettings.value,
+      discountSettings.maxDiscountAmount
     );
 
     return people.map((person) => {
@@ -396,10 +439,48 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
 
   const handleNumberInput = (
     e: React.ChangeEvent<HTMLInputElement>,
-    callback: (value: number) => void
+    callback: (value: number) => void,
+    allowDecimal: boolean = false,
+    maxValue?: number
   ) => {
-    const value = e.target.value.replace(/[^0-9]/g, "");
-    callback(value === "" ? 0 : parseInt(value, 10));
+    let value = e.target.value;
+
+    if (allowDecimal) {
+      // Remove any non-digit characters except decimal point
+      value = value.replace(/[^\d.]/g, "");
+
+      // Ensure only one decimal point
+      const parts = value.split(".");
+      if (parts.length > 2) {
+        value = parts[0] + "." + parts.slice(1).join("");
+      }
+
+      // Handle empty input
+      if (value === "") {
+        callback(0);
+        return;
+      }
+
+      // Handle just decimal point
+      if (value === ".") {
+        return;
+      }
+
+      // Parse the number and apply max value if needed
+      const numValue = parseFloat(value);
+      if (isNaN(numValue)) return;
+
+      callback(
+        maxValue !== undefined ? Math.min(numValue, maxValue) : numValue
+      );
+    } else {
+      // Only allow integers
+      value = value.replace(/[^0-9]/g, "");
+      const numValue = value === "" ? 0 : parseInt(value, 10);
+      callback(
+        maxValue !== undefined ? Math.min(numValue, maxValue) : numValue
+      );
+    }
   };
 
   const calculateGrandTotal = () => {
@@ -642,6 +723,43 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
     }
   };
 
+  const handlePercentageInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+
+    // Allow empty input and single decimal point
+    if (value === "" || value === ".") {
+      setPercentageInputValue(value);
+      setDiscountSettings({
+        ...discountSettings,
+        value: 0,
+      });
+      return;
+    }
+
+    // Validate decimal number format
+    if (!/^\d*\.?\d*$/.test(value)) {
+      return;
+    }
+
+    const numValue = parseFloat(value);
+    if (isNaN(numValue)) return;
+
+    // If value is over 100, don't update the input
+    if (numValue > 100) {
+      setPercentageInputValue("100");
+      setDiscountSettings({
+        ...discountSettings,
+        value: numValue,
+      });
+    } else {
+      setPercentageInputValue(value);
+      setDiscountSettings({
+        ...discountSettings,
+        value: numValue,
+      });
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto p-4">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -677,14 +795,24 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
                 <div className="relative">
                   <input
                     type="text"
-                    value={formatNumber(discountSettings.value)}
-                    onChange={(e) =>
-                      handleNumberInput(e, (value) =>
-                        setDiscountSettings({
-                          ...discountSettings,
-                          value,
-                        })
-                      )
+                    value={
+                      discountSettings.type === "percentage"
+                        ? percentageInputValue
+                        : formatNumber(discountSettings.value)
+                    }
+                    onChange={
+                      discountSettings.type === "percentage"
+                        ? handlePercentageInput
+                        : (e) =>
+                            handleNumberInput(e, (value) =>
+                              setDiscountSettings({
+                                ...discountSettings,
+                                value,
+                              })
+                            )
+                    }
+                    placeholder={
+                      discountSettings.type === "percentage" ? "0.00" : "0"
                     }
                     className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 pl-8"
                   />
@@ -723,7 +851,11 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
                 <div className="relative">
                   <input
                     type="text"
-                    value={formatNumber(discountSettings.maxDiscountAmount)}
+                    value={
+                      discountSettings.type === "percentage"
+                        ? formatNumber(discountSettings.maxDiscountAmount)
+                        : "∞"
+                    }
                     onChange={(e) =>
                       handleNumberInput(e, (value) =>
                         setDiscountSettings({
@@ -732,7 +864,12 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
                         })
                       )
                     }
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 pl-8"
+                    disabled={discountSettings.type === "flat"}
+                    className={`w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 pl-8 ${
+                      discountSettings.type === "flat"
+                        ? "bg-gray-100 text-gray-500"
+                        : ""
+                    }`}
                   />
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
                     Rp
