@@ -6,14 +6,14 @@ import BillSplitter from "../../components/BillSplitter";
 const state = Astro.url.searchParams.get("state");
 ---
 
-<Layout title="Bill Splitter - Toolbox">
-  <main class="container mx-auto px-4 py-8">
+<Layout title="Bill Split | Toolbox">
+  <main class="container mx-auto py-8">
     <h1 class="text-4xl font-bold mb-8">Bill Splitter</h1>
     <p class="text-gray-600 mb-8">
       Split bills among friends with support for discounts and additional fees.
       Add people, their items, and any shared fees to calculate how much each
       person owes.
     </p>
-    <BillSplitter client:load initialState={state} />
+    <BillSplitter client:only="react" initialState={state} />
   </main>
 </Layout>

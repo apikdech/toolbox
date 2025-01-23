@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import html2canvas from "html2canvas";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 import type {
   Person,
   Item,
@@ -131,8 +133,10 @@ interface CompactPerson {
 
 interface CompactState {
   p: CompactPerson[]; // people
-  d: {
-    // discount
+  t: string; // title
+  d: string; // date
+  s: {
+    // discount settings
     t: "percentage" | "flat"; // type
     v: number; // value
     m: number; // minimumSpend
@@ -147,6 +151,8 @@ interface CompactState {
 
 const compressState = (
   people: Person[],
+  title: string,
+  date: string,
   discountSettings: DiscountSettings,
   additionalFees: AdditionalFee[]
 ): string => {
@@ -159,7 +165,9 @@ const compressState = (
         p: item.price,
       })),
     })),
-    d: {
+    t: title,
+    d: date,
+    s: {
       t: discountSettings.type,
       v: discountSettings.value,
       m: discountSettings.minimumSpend,
@@ -181,6 +189,8 @@ const expandState = (
   compressed: string
 ): {
   people: Person[];
+  title: string;
+  date: string;
   discountSettings: DiscountSettings;
   additionalFees: AdditionalFee[];
 } => {
@@ -198,12 +208,14 @@ const expandState = (
           price: i.p,
         })),
       })),
+      title: compactState.t || "",
+      date: compactState.d || new Date().toISOString().split("T")[0],
       discountSettings: {
-        type: compactState.d.t,
-        value: compactState.d.v,
-        minimumSpend: compactState.d.m,
+        type: compactState.s.t,
+        value: compactState.s.v,
+        minimumSpend: compactState.s.m,
         maxDiscountAmount:
-          compactState.d.x === -1 ? Infinity : compactState.d.x,
+          compactState.s.x === -1 ? Infinity : compactState.s.x,
       },
       additionalFees: compactState.f.map((f) => ({
         id: crypto.randomUUID(),
@@ -215,6 +227,8 @@ const expandState = (
     console.error("Error parsing state from URL:", error);
     return {
       people: [],
+      title: "",
+      date: new Date().toISOString().split("T")[0],
       discountSettings: {
         type: "percentage",
         value: 0,
@@ -230,8 +244,22 @@ interface BillSplitterProps {
   initialState?: string | null;
 }
 
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+  const day = date.getDate();
+  const month = date.toLocaleDateString("en-US", { month: "long" });
+  const year = date.getFullYear();
+  const weekday = date.toLocaleDateString("en-US", { weekday: "long" });
+  return `${weekday}, ${day} ${month} ${year}`;
+};
+
 const BillSplitter = ({ initialState }: BillSplitterProps) => {
   const [people, setPeople] = useState<Person[]>([]);
+  const [title, setTitle] = useState<string>("");
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [date, setDate] = useState<string>(
+    new Date().toISOString().split("T")[0]
+  );
   const [discountSettings, setDiscountSettings] = useState<DiscountSettings>({
     type: "percentage",
     value: 0,
@@ -243,21 +271,34 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
   const peopleContainerRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
 
+  // Update date handling
+  const handleDateChange = (date: Date | null) => {
+    if (date) {
+      setSelectedDate(date);
+      setDate(date.toISOString().split("T")[0]);
+    }
+  };
+
   // Load initial state from props
   useEffect(() => {
     if (initialState) {
       try {
         const {
           people: p,
-          discountSettings: d,
-          additionalFees: f,
+          title: t,
+          date: d,
+          discountSettings: ds,
+          additionalFees: af,
         } = expandState(initialState);
         setPeople(p);
-        setDiscountSettings(d);
-        setAdditionalFees(f);
+        setTitle(t);
+        setDate(d);
+        setSelectedDate(new Date(d));
+        setDiscountSettings(ds);
+        setAdditionalFees(af);
         // Set the percentage input value when loading from URL
-        if (d.type === "percentage") {
-          setPercentageInputValue(d.value.toString());
+        if (ds.type === "percentage") {
+          setPercentageInputValue(ds.value.toString());
         }
       } catch (error) {
         console.error("Error loading initial state:", error);
@@ -273,13 +314,21 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
       return;
     }
 
-    const state = compressState(people, discountSettings, additionalFees);
+    const state = compressState(
+      people,
+      title,
+      date,
+      discountSettings,
+      additionalFees
+    );
     const url = new URL(window.location.href);
 
     if (
       state ===
       compressState(
         [],
+        "",
+        new Date().toISOString().split("T")[0],
         {
           type: "percentage",
           value: 0,
@@ -300,7 +349,7 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
         window.history.replaceState({}, "", url.toString());
       }
     }
-  }, [people, discountSettings, additionalFees]);
+  }, [people, title, date, discountSettings, additionalFees]);
 
   const addPerson = () => {
     const newPerson: Person = {
@@ -509,23 +558,18 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
     container.style.fontFamily = "system-ui, -apple-system, sans-serif";
 
     // Add title with date
-    const title = document.createElement("div");
-    title.style.textAlign = "center";
-    title.style.marginBottom = "1.5rem";
-    title.innerHTML = `
+    const exportedTitle = document.createElement("div");
+    exportedTitle.style.textAlign = "center";
+    exportedTitle.style.marginBottom = "1.5rem";
+    exportedTitle.innerHTML = `
       <div style="font-size: 2rem; font-weight: bold; margin-bottom: 0.5rem; color: #1f2937">
-        Bill Split Summary
+        ${title || "Bill Split Summary"}
       </div>
       <div style="color: #6b7280; font-size: 0.875rem">
-        ${new Date().toLocaleDateString("en-US", {
-          weekday: "long",
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        })}
+        ${formatDate(date)}
       </div>
     `;
-    container.appendChild(title);
+    container.appendChild(exportedTitle);
 
     // Add settings section
     const settingsSection = document.createElement("div");
@@ -534,6 +578,18 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
     settingsSection.style.backgroundColor = "#f9fafb";
     settingsSection.style.borderRadius = "0.5rem";
     settingsSection.style.fontSize = "0.875rem";
+
+    // Add bill details
+    const billDetails = document.createElement("div");
+    billDetails.style.marginBottom = "0.5rem";
+    billDetails.style.padding = "0.25rem";
+    billDetails.style.borderBottom = "1px solid #e5e7eb";
+    billDetails.innerHTML = `
+      <div>
+        <strong>Title:</strong> ${title || "Bill Split Summary"}
+      </div>
+    `;
+    settingsSection.appendChild(billDetails);
 
     // Add discount settings
     const discountInfo = document.createElement("div");
@@ -711,9 +767,8 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
       });
 
       const link = document.createElement("a");
-      link.download = `bill-split-${
-        new Date().toISOString().split("T")[0]
-      }.png`;
+      const downloadTitle = (title || "summary").replace(/\s+/g, "-");
+      link.download = `bill-split-${downloadTitle}-${date.split("T")[0]}.png`;
       link.href = canvas.toDataURL("image/png");
       link.click();
     } catch (error) {
@@ -765,6 +820,35 @@ const BillSplitter = ({ initialState }: BillSplitterProps) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Settings Panel */}
         <div className="lg:col-span-1 space-y-6">
+          <div className="bg-white rounded-lg shadow-md p-4 space-y-4">
+            <h2 className="text-xl font-bold">Bill Details</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Title
+                </label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Bill Split Summary"
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Date
+                </label>
+                <DatePicker
+                  selected={selectedDate}
+                  onChange={handleDateChange}
+                  dateFormat="EEEE, d MMMM yyyy"
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 cursor-pointer"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="bg-white rounded-lg shadow-md p-4 space-y-4">
             <h2 className="text-xl font-bold">Discount Settings</h2>
             <div className="space-y-3">
